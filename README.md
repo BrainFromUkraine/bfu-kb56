@@ -213,8 +213,9 @@ docs/             protocol, hardware guide, testing
 
 ## Roadmap
 
-- Arduino / ESP-IDF host library
-- I2C firmware flasher for ESP32 (ST AN4221)
+- Raspberry Pi: Python library and a system service that turns BFU-KB56 into a regular Linux keyboard (uinput)
+- Firmware updates from Raspberry Pi over I2C (ST system bootloader, stm32flash)
+- Host library for ESP32 (Arduino framework and ESP-IDF)
 
 ## Contributing
 
