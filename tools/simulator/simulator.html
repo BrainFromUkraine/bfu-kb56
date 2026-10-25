@@ -1,0 +1,990 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- SPDX-FileCopyrightText: 2026 BFU Electronics LTD -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<title>BFU-KB56 Simulator</title>
+<style>
+/* Layout: the device on top like on a bench, three instrument panels under it
+   (inside the MCU, the ESP32 host, the register file). */
+:root {
+  --bg: #e7eaee;
+  --panel: #f6f7f9;
+  --ink: #1a1f27;
+  --muted: #5b6471;
+  --line: #cdd2d9;
+  --case: #b6bbc2;
+  --case-edge: #9da3ab;
+  --key: #24272c;
+  --key-hi: #33373e;
+  --key-press: #3d4350;
+  --key-ink: #f1f2f4;
+  --key-dim: #9aa0aa;
+  --accent: #2456d4;
+  --accent-soft: #dfe7fb;
+  --signal: #b77d00;
+  --signal-soft: #f6ead0;
+  --run: #23855a;
+  --run-soft: #d9efe4;
+  --stop: #6a6f7a;
+  --danger: #b2382c;
+  --on-accent: #ffffff;
+  --font-display: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #13161b; --panel: #1a1e25; --ink: #e5e8ed; --muted: #99a2af; --line: #2c323c;
+    --case: #3a3f47; --case-edge: #2d3138; --key: #0f1114; --key-hi: #1c1f24; --key-press: #2b3140;
+    --key-ink: #e9ebee; --key-dim: #858c97; --accent: #7099ff; --accent-soft: #1f2a45;
+    --signal: #f0b43c; --signal-soft: #3a2f17; --run: #4cc38a; --run-soft: #17302a; --stop: #8a909b;
+    --danger: #ef7466; --on-accent: #0c1222; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #13161b; --panel: #1a1e25; --ink: #e5e8ed; --muted: #99a2af; --line: #2c323c;
+  --case: #3a3f47; --case-edge: #2d3138; --key: #0f1114; --key-hi: #1c1f24; --key-press: #2b3140;
+  --key-ink: #e9ebee; --key-dim: #858c97; --accent: #7099ff; --accent-soft: #1f2a45;
+  --signal: #f0b43c; --signal-soft: #3a2f17; --run: #4cc38a; --run-soft: #17302a; --stop: #8a909b;
+  --danger: #ef7466; --on-accent: #0c1222; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.5; }
+.page {
+  max-width: 1280px; margin: 0 auto;
+  padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 22px;
+}
+h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(1.45rem, 2.6vw, 2.1rem); font-weight: 600; letter-spacing: -0.01em; }
+h1 .thin { font-weight: 500; color: var(--muted); }
+h2 { font-size: 0.98rem; font-weight: 500; letter-spacing: 0.01em; }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
+p { margin: 0; }
+
+button, select, input { font: inherit; color: inherit; }
+button {
+  border: 1px solid var(--line); background: var(--panel); border-radius: 7px;
+  padding: 6px 12px; cursor: pointer; font-size: 0.88rem; font-weight: 500;
+}
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+button.warn { color: var(--danger); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- header */
+.top { display: flex; flex-wrap: wrap; gap: 16px 32px; align-items: end; justify-content: space-between; }
+.top .lede { max-width: 64ch; color: var(--muted); margin-top: 8px; }
+.top-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ---------- device */
+.device { display: grid; gap: 10px; position: relative; }
+.strip { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; font-size: 0.86rem; }
+.ind { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.dot { width: 11px; height: 11px; border-radius: 50%; background: var(--line); box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
+.dot.on-ua { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), 0 0 10px var(--accent); }
+.dot.on-int { background: var(--signal); box-shadow: 0 0 0 3px var(--signal-soft); }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px;
+  font-size: 0.78rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  border: 1px solid var(--line); color: var(--muted);
+}
+.chip.run { color: var(--run); background: var(--run-soft); border-color: transparent; }
+.chip.stop { color: var(--stop); }
+.chip.on { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
+.chip.sig { color: var(--signal); background: var(--signal-soft); border-color: transparent; }
+.strip .label { color: var(--muted); }
+
+.board-wrap { max-width: 980px; width: 100%; position: relative; container-type: inline-size; }
+.board {
+  background: var(--case); border-radius: 14px; padding: 2.1%;
+  box-shadow: inset 0 -3px 0 var(--case-edge), 0 10px 24px -14px rgba(0,0,0,.45);
+  display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 0.75cqw;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.key {
+  position: relative; aspect-ratio: 1 / 0.9; border: 0; border-radius: 0.9cqw; padding: 0;
+  background: linear-gradient(var(--key-hi), var(--key) 38%);
+  box-shadow: inset 0 -0.35cqw 0 rgba(0,0,0,.45);
+  color: var(--key-ink); cursor: pointer; font-family: var(--font-body);
+  transition: transform 40ms, background 40ms;
+}
+.key.space { aspect-ratio: auto; }
+.key:hover { background: linear-gradient(var(--key-press), var(--key) 60%); }
+.key.down { transform: translateY(0.25cqw); background: var(--key-press); box-shadow: inset 0 0 0 0.25cqw var(--accent); }
+.key.latched { box-shadow: inset 0 0 0 0.25cqw var(--signal); }
+.key.locked { box-shadow: inset 0 0 0 0.25cqw var(--signal), inset 0 -0.6cqw 0 var(--signal); }
+.key .main { position: absolute; inset: 0; display: grid; place-items: center; font-size: clamp(11px, 2.9cqw, 25px); font-weight: 500; line-height: 1; }
+.key .main.word { font-size: clamp(8px, 1.65cqw, 14px); font-weight: 600; letter-spacing: 0.02em; }
+.key .en { position: absolute; left: 9%; top: 7%; font-size: clamp(7px, 1.35cqw, 12px); color: var(--key-dim); line-height: 1; }
+.key .fn { position: absolute; right: 9%; bottom: 8%; font-size: clamp(7px, 1.3cqw, 11.5px); color: var(--signal); line-height: 1; font-weight: 500; }
+.key.space .bar { position: absolute; left: 35%; right: 35%; top: 62%; height: 2px; border-radius: 2px; background: var(--key-dim); opacity: .6; }
+.board.lang-en .key .en { color: var(--key-ink); font-weight: 600; }
+.board.lang-en .key .main:not(.word) { color: var(--key-dim); }
+.board.fn-on .key .fn { color: var(--signal); font-weight: 700; text-shadow: 0 0 6px var(--signal); }
+.board.fn-on .key .main, .board.fn-on .key .en { opacity: .35; }
+
+.hint { color: var(--muted); font-size: 0.86rem; max-width: 98ch; }
+kbd { font-family: var(--font-mono); font-size: 0.8em; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--panel); }
+
+[hidden] { display: none !important; }
+
+.boot {
+  position: absolute; inset: 0; border-radius: 14px; display: grid; place-items: center; text-align: center;
+  background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(2px); padding: 16px;
+}
+.boot .box { max-width: 52ch; display: grid; gap: 10px; justify-items: center; }
+.boot h2 { font-size: 1.05rem; }
+
+/* ---------- panels */
+.grid { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 760px) {
+  .grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); }
+  .regs { grid-column: 1 / -1; }
+}
+@media (min-width: 1180px) {
+  .grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 0.95fr); }
+  .regs { grid-column: auto; }
+}
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 11px; padding: 16px; display: grid; gap: 14px; min-width: 0; }
+.panel > * { min-width: 0; }
+.panel header { display: grid; gap: 2px; }
+.panel .sub { color: var(--muted); font-size: 0.85rem; }
+.section-label { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+/* analyzer */
+.scope { width: 100%; height: 118px; display: block; border-radius: 7px; background: var(--bg); }
+
+/* state list */
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 14px; margin: 0; font-size: 0.88rem; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; }
+
+/* fifo */
+.fifo { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 5px; }
+.slot {
+  aspect-ratio: 1; border: 1px dashed var(--line); border-radius: 6px; display: grid; place-items: center;
+  font-size: 0.95rem; position: relative; min-width: 0; overflow: hidden;
+}
+.slot.full { border-style: solid; border-color: var(--signal); background: var(--signal-soft); }
+.slot .t { position: absolute; top: 2px; left: 4px; font-size: 0.6rem; color: var(--muted); font-family: var(--font-mono); }
+.slot .g { font-weight: 600; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 92%; }
+.fifo-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.ovf { color: var(--danger); font-weight: 600; font-size: 0.8rem; }
+
+/* host */
+.switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.88rem; }
+.switch input { width: 34px; height: 20px; appearance: none; border-radius: 999px; background: var(--line); position: relative; cursor: pointer; margin: 0; transition: background .15s; }
+.switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--panel); transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+.switch input:checked { background: var(--accent); }
+.switch input:checked::after { transform: translateX(14px); }
+.term {
+  background: var(--key); color: var(--key-ink); border-radius: 8px; padding: 12px 14px; min-height: 104px; max-height: 190px;
+  overflow-y: auto; font-family: var(--font-mono); font-size: 0.95rem; white-space: pre-wrap; word-break: break-word; line-height: 1.55;
+}
+.term .k { display: inline-block; font-size: 0.72rem; padding: 0 5px; margin: 0 2px; border-radius: 4px; border: 1px solid var(--key-dim); color: var(--signal); vertical-align: 1px; line-height: 1.5; }
+.term .cur { display: inline-block; width: 0.55em; height: 1.05em; background: var(--accent); vertical-align: -0.15em; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.events { display: grid; gap: 0; font-size: 0.82rem; overflow-x: auto; }
+.ev { display: grid; grid-template-columns: 74px 52px 70px minmax(64px, 1fr) minmax(0, 1.6fr); gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--line); align-items: center; min-width: 440px; }
+.ev:last-child { border-bottom: 0; }
+.pill { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; justify-self: start; }
+.pill.p1 { background: var(--accent-soft); color: var(--accent); }
+.pill.p2 { background: var(--bg); color: var(--muted); }
+.pill.p3 { background: var(--signal-soft); color: var(--signal); }
+.ev .txt { font-weight: 600; }
+.ev .hex { font-family: var(--font-mono); font-size: 0.75rem; color: var(--muted); white-space: nowrap; }
+.ev .m { color: var(--muted); font-size: 0.75rem; }
+.empty { color: var(--muted); font-size: 0.85rem; padding: 6px 0; }
+.log { font-family: var(--font-mono); font-size: 0.74rem; max-height: 168px; overflow: auto; display: grid; gap: 1px; color: var(--muted); }
+.log div { white-space: nowrap; }
+.log b { color: var(--ink); font-weight: 500; }
+.log .nack { color: var(--danger); }
+
+/* registers */
+.field { display: grid; gap: 4px; }
+.field label, .field .lbl { font-size: 0.86rem; display: flex; justify-content: space-between; gap: 8px; }
+.field .val { font-family: var(--font-mono); font-size: 0.8rem; color: var(--muted); }
+.checks { display: grid; gap: 4px; }
+.field .checks label { justify-content: flex-start; }
+.checks label { display: flex; gap: 8px; align-items: baseline; font-size: 0.86rem; cursor: pointer; }
+.checks .bit { font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); min-width: 34px; }
+input[type=range] { width: 100%; accent-color: var(--accent); }
+select { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 4px 8px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; padding: 4px 14px; }
+.seg button.sel { background: var(--accent); color: var(--on-accent); }
+.regtable { width: 100%; border-collapse: collapse; font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.regtable td { padding: 3px 4px; border-bottom: 1px solid var(--line); }
+.regtable td:first-child, .regtable td:last-child { font-family: var(--font-mono); }
+.regtable td:last-child { text-align: right; }
+.note { color: var(--muted); font-size: 0.8rem; }
+
+.foot { color: var(--muted); font-size: 0.85rem; display: grid; gap: 6px; max-width: 100ch; }
+
+@media (prefers-reduced-motion: reduce) {
+  .term .cur { animation: none; }
+  .key { transition: none; }
+}
+</style>
+
+<div class="page">
+  <header class="top">
+    <div>
+      <h1>BFU-KB56 <span class="thin">· simulator</span></h1>
+      <p class="lede">Firmware 1.0.1. The keyboard logic here is the same C code from <code>src/app</code> that runs on the STM32G030, compiled to WebAssembly. On the right, a host reads it over I2C the way an ESP32 would.</p>
+    </div>
+    <div class="top-actions">
+      <button id="btn-demo" class="primary" type="button">Type the demo phrase</button>
+      <button id="btn-power" type="button">Power cycle</button>
+    </div>
+  </header>
+
+  <section class="device" aria-label="Keyboard">
+    <div class="strip">
+      <span class="ind"><span class="dot" id="led-ua"></span>UA LED</span>
+      <span class="ind"><span class="dot" id="led-int"></span><span id="int-text">INT: 1, queue empty</span></span>
+      <span class="ind"><span class="label">STM32</span><span class="chip run" id="pwr-chip">RUN</span></span>
+      <span class="ind"><span class="label">Language</span><span class="chip on" id="lang-chip">UA</span></span>
+      <span class="ind"><span class="label">Caps</span><span class="chip" id="caps-chip">off</span></span>
+      <span class="ind"><span class="label">Held</span><span id="mods-text">—</span></span>
+    </div>
+    <div class="board-wrap">
+      <div class="board" id="board"></div>
+      <div class="boot" id="boot" hidden>
+        <div class="box">
+          <h2>MCU is in the ST bootloader</h2>
+          <p class="note">The host sent <code>20 B0 A5</code>. The STM32 restarted into ROM at 0x1FFF0000: the application firmware is not running and 0x5E does not answer (NACK). An I2C flasher speaking ST AN4221 would now load new firmware.</p>
+          <button id="btn-boot-exit" class="primary" type="button">Power cycle</button>
+        </div>
+      </div>
+    </div>
+    <p class="hint">Click the keys or type on your own keyboard: positions are physical, your PC layout does not matter. <kbd>Fn</kbd> is right <kbd>Alt</kbd>, <kbd>UA/EN</kbd> is <kbd>\</kbd>, <kbd>Ctrl</kbd> is mouse-only so the browser does not catch the shortcut. A click latches a modifier until the next key; a double click holds it until you click it again. Caps Lock: Fn, then Shift twice with a pause.</p>
+  </section>
+
+  <div class="grid">
+    <section class="panel mcu" aria-labelledby="h-mcu">
+      <header>
+        <h2 id="h-mcu">STM32G030</h2>
+        <p class="sub">What happens inside the microcontroller</p>
+      </header>
+      <div>
+        <div class="section-label">Signals, last 3 s · STM32: green = RUN, grey = Stop</div>
+        <canvas class="scope" id="scope" aria-label="INT, I2C and power mode timing diagram"></canvas>
+      </div>
+      <dl class="kv">
+        <dt>Power</dt><dd id="st-power">—</dd>
+        <dt>Auto-repeat</dt><dd id="st-repeat">—</dd>
+        <dt>Uptime</dt><dd id="st-time">—</dd>
+        <dt>Events generated</dt><dd id="st-events">—</dd>
+        <dt>I2C pointer</dt><dd id="st-ptr" class="mono">—</dd>
+      </dl>
+      <div>
+        <div class="fifo-head">
+          <div class="section-label">Event queue · <span id="fifo-count">0</span>/16</div>
+          <span class="ovf" id="fifo-ovf" hidden>overflow</span>
+        </div>
+        <div class="fifo" id="fifo" style="margin-top:6px"></div>
+      </div>
+    </section>
+
+    <section class="panel host" aria-labelledby="h-host">
+      <header>
+        <h2 id="h-host">ESP32 host</h2>
+        <p class="sub">Reads the keyboard over I2C at address 0x5E</p>
+      </header>
+      <div class="row" style="justify-content:space-between">
+        <label class="switch"><input type="checkbox" id="auto" checked> Read automatically when INT = 0</label>
+        <button id="btn-clear-term" type="button">Clear screen</button>
+      </div>
+      <div class="term" id="term" aria-live="polite"></div>
+      <div class="row">
+        <span class="section-label" style="margin-right:4px">Manual</span>
+        <button id="m-count" type="button">COUNT</button>
+        <button id="m-one" type="button">1 event</button>
+        <button id="m-all" type="button">All events</button>
+        <button id="m-partial" type="button" title="The read stops after byte 5: the event must stay in the queue">Abort after 5 bytes</button>
+        <button id="m-status" type="button">STATUS</button>
+      </div>
+      <div>
+        <div class="section-label">Events read by the host</div>
+        <div class="events" id="events"></div>
+      </div>
+      <div>
+        <div class="section-label">I2C traffic</div>
+        <div class="log" id="log"></div>
+      </div>
+    </section>
+
+    <section class="panel regs" aria-labelledby="h-regs">
+      <header>
+        <h2 id="h-regs">Registers</h2>
+        <p class="sub">Every change is an I2C write, as a host library would do it</p>
+      </header>
+      <div class="field">
+        <div class="lbl">CONFIG <span class="val" id="cfg-val">0x0D</span></div>
+        <div class="checks" id="cfg"></div>
+      </div>
+      <div class="field">
+        <label for="r-delay">Repeat delay <span class="val" id="v-delay"></span></label>
+        <input type="range" id="r-delay" min="10" max="100" step="1">
+      </div>
+      <div class="field">
+        <label for="r-rate">Repeat period <span class="val" id="v-rate"></span></label>
+        <input type="range" id="r-rate" min="2" max="20" step="1">
+      </div>
+      <div class="field">
+        <div class="lbl">Language <span class="val">LANG 0x08</span></div>
+        <div class="seg" role="group" aria-label="Language"><button type="button" id="lang-ua">UA</button><button type="button" id="lang-en">EN</button></div>
+      </div>
+      <div class="field">
+        <label for="r-led">UA LED <span class="val">LED 0x09</span></label>
+        <select id="r-led"><option value="0">auto: on when UA</option><option value="1">off</option><option value="2">on</option></select>
+      </div>
+      <div class="field">
+        <label for="r-bl">Backlight <span class="val" id="v-bl"></span></label>
+        <input type="range" id="r-bl" min="0" max="255" step="1">
+        <span class="note">While the backlight is on the STM32 stays awake: PWM stops in Stop mode.</span>
+      </div>
+      <div class="field">
+        <div class="section-label">Commands 0x20</div>
+        <div class="row">
+          <button id="c-clear" type="button">Clear FIFO</button>
+          <button id="c-reset" type="button">Reset</button>
+          <button id="c-boot" class="warn" type="button">Bootloader</button>
+        </div>
+      </div>
+      <div class="field">
+        <div class="row" style="justify-content:space-between">
+          <span class="section-label">Contents 0x00–0x0A</span>
+          <button id="r-dump" type="button">Read</button>
+        </div>
+        <table class="regtable" id="regtable"></table>
+        <span class="note">Reading STATUS clears the overflow flag, exactly as on the board.</span>
+      </div>
+    </section>
+  </div>
+
+  <footer class="foot">
+    <p>Exact, because it is the same firmware: layouts, 5 ms debounce, modifier ordering, Caps, auto-repeat, queue, registers, commands, and the sleep rule from <code>power.c</code>. Time runs 1:1 with real time.</p>
+    <p>Not modelled here: I2C bus timing (clock stretching, edges) and the real wake-up from Stop via EXTI. Those are covered by the Renode full-system tests in <code>tests/renode_full</code>.</p>
+  </footer>
+</div>
+
+<script>
+/*__HOST_JS__*/
+</script>
+<script>
+'use strict';
+const WASM_B64 = "__WASM_BASE64__";
+
+const ROWS = 5, COLS = 12, MIN_HOLD = 25, SCOPE_MS = 3000;
+const POS = { SHIFT: 36, FN: 48, CTRL: 49, ALT: 50 };
+const MOD_POS = new Set([POS.SHIFT, POS.FN, POS.CTRL, POS.ALT]);
+const REG_NAMES = ['ID', 'VER_MAJOR', 'VER_MINOR', 'STATUS', 'COUNT', 'CONFIG', 'REPEAT_DELAY', 'REPEAT_RATE', 'LANG', 'LED', 'BACKLIGHT'];
+const CFG_BITS = [
+  [UAKB.CFG.INT_EN, 'INT_EN', 'INT line while the queue is not empty'],
+  [UAKB.CFG.RELEASES, 'RELEASES', 'Report key releases'],
+  [UAKB.CFG.REPEAT, 'REPEAT', 'Auto-repeat'],
+  [UAKB.CFG.SLEEP, 'SLEEP', 'Sleep when idle (Stop 1)'],
+  [UAKB.CFG.APOS_ASCII, 'APOS_ASCII', 'Apostrophe as ASCII \''],
+];
+const PHYS = {
+  Backquote: 0, Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4, Digit5: 5, Digit6: 6, Digit7: 7, Digit8: 8, Digit9: 9, Digit0: 10, Backspace: 11,
+  KeyQ: 12, KeyW: 13, KeyE: 14, KeyR: 15, KeyT: 16, KeyY: 17, KeyU: 18, KeyI: 19, KeyO: 20, KeyP: 21, BracketLeft: 22, BracketRight: 23,
+  KeyA: 24, KeyS: 25, KeyD: 26, KeyF: 27, KeyG: 28, KeyH: 29, KeyJ: 30, KeyK: 31, KeyL: 32, Semicolon: 33, Quote: 34, Enter: 35, NumpadEnter: 35,
+  ShiftLeft: 36, ShiftRight: 36, KeyZ: 37, KeyX: 38, KeyC: 39, KeyV: 40, KeyB: 41, KeyN: 42, KeyM: 43, Comma: 44, Period: 45, Slash: 46, ArrowUp: 47,
+  AltRight: 48, AltLeft: 50, Backslash: 51, IntlBackslash: 51, Space: 53, ArrowLeft: 57, ArrowDown: 58, ArrowRight: 59,
+};
+const DEMO = [
+  [36, 28], [29], [41], [26], [25], [42], [36, 46], [53], [51], [36, 41], [36, 27], [36, 18], [36, 1], [53],
+  [51], [0], [36, 0], [53], [48, 36, 18], [35],
+];
+
+let core, bus, host;
+let simT = 0;               /* JS-side clock in ms; the MCU clock stops in the bootloader */
+let mode = 'run';           /* 'run' | 'boot' */
+const down = new Map();     /* pos -> { since, src } */
+const queue = [];           /* ordered presses/releases: { d, pos, src } */
+let lastDownAt = -1e9;
+const latch = new Map();    /* pos -> { kind: 'once' | 'lock', at } */
+const timers = [];          /* { at, fn } */
+const scope = new Uint8Array(SCOPE_MS);   /* bit0 INT low, bit1 I2C traffic, bit2 Stop */
+let i2cMark = false;
+let lastPoll = -1e9;
+let st = null;
+let term = [], termDirty = true;
+let events = [], eventsDirty = true;
+let logLines = [], logDirty = true;
+let regDump = null;
+let wall = 0, started = false;
+
+/* run the simulation up to the current wall-clock time (1 ms steps, at most 250 ms at once) */
+let catching = false;
+function catchUp() {
+  if (!started || catching) return;           /* inputs fired from inside a step use the current ms */
+  const now = performance.now();
+  let dt = Math.floor(now - wall);
+  if (dt <= 0) return;
+  wall += dt;
+  if (dt > 250) dt = 250;
+  catching = true;
+  try { for (let i = 0; i < dt; i++) stepMs(); } finally { catching = false; }
+}
+
+const $ = (id) => document.getElementById(id);
+const hex = (v) => v.toString(16).toUpperCase().padStart(2, '0');
+
+/* ------------------------------------------------------------ legends from the firmware */
+function legend(act, upper) {
+  if (!act) return '';
+  if (act & 0x80000000) {
+    const c = act & 0xFF;
+    return ({ 0x20: 'UA/EN', 0x21: 'Caps', 0x22: 'Light' })[c] || specialName(c);
+  }
+  if (act & 0x40000000) return ({ 1: '⇧', 2: 'Ctrl', 4: 'Alt', 8: 'Fn' })[act & 0xFF];
+  const ch = String.fromCodePoint(act);
+  const named = { '\b': '⌫', '\n': '⏎', '\t': 'Tab', '\x1b': 'Esc', '\x7f': 'Del', ' ': '' };
+  if (ch in named) return named[ch];
+  return upper ? ch.toUpperCase() : ch;
+}
+
+function buildBoard() {
+  const board = $('board');
+  board.textContent = '';
+  for (let pos = 0; pos < ROWS * COLS; pos++) {
+    if (!core.present(pos)) continue;
+    const r = Math.floor(pos / COLS), c = pos % COLS;
+    const ua = legend(core.resolve(pos, 1, 0, 0, 0, 0), true);
+    const en = legend(core.resolve(pos, 0, 0, 0, 0, 0), true);
+    const fn = legend(core.resolve(pos, 1, 0, 1, 0, 0), false);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'key';
+    b.tabIndex = -1;
+    b.dataset.pos = pos;
+    b.style.gridRow = String(r + 1);
+    b.style.gridColumn = pos === 53 ? '5 / span 5' : String(c + 1);
+    if (pos === 53) b.classList.add('space');
+    const main = document.createElement('span');
+    main.className = 'main' + (ua.length > 2 ? ' word' : '');
+    main.textContent = ua;
+    b.append(main);
+    if (en && en !== ua) {
+      const e = document.createElement('span'); e.className = 'en'; e.textContent = en; b.append(e);
+    }
+    if (fn && fn !== ua && fn.toUpperCase() !== ua) {
+      const f = document.createElement('span'); f.className = 'fn'; f.textContent = fn; b.append(f);
+    }
+    if (pos === 53) { const bar = document.createElement('span'); bar.className = 'bar'; b.append(bar); }
+    b.setAttribute('aria-label', [ua || 'Space', en, fn ? 'Fn ' + fn : ''].filter(Boolean).join(', '));
+    board.append(b);
+  }
+}
+
+/* ------------------------------------------------------------ key state */
+/* Inputs are applied in the order they happened. A key stays down at least MIN_HOLD ms
+ * (longer than the 5 ms debounce) and two ordinary keys go down at least 6 ms apart, so a
+ * fast tap or a scripted sequence reaches the firmware exactly in the order it was typed. */
+function press(pos, src) {
+  if (mode !== 'run') return;
+  catchUp();
+  queue.push({ d: true, pos, src });
+  processQueue();
+}
+function release(pos) {
+  catchUp();
+  queue.push({ d: false, pos });
+  processQueue();
+}
+function after(ms, fn) { timers.push({ at: simT + ms, fn }); }
+
+function clickModifier(pos) {
+  const l = latch.get(pos);
+  if (!l) { latch.set(pos, { kind: 'once', at: simT }); press(pos, 'latch'); return; }
+  if (l.kind === 'once' && simT - l.at < 350) { l.kind = 'lock'; return; }
+  latch.delete(pos); release(pos);
+}
+
+function processQueue() {
+  while (queue.length) {
+    const q = queue[0];
+    if (q.d) {
+      if (down.has(q.pos)) { queue.shift(); continue; }
+      if (!MOD_POS.has(q.pos) && simT - lastDownAt < 6) return;
+      down.set(q.pos, { since: simT, src: q.src });
+      if (!MOD_POS.has(q.pos)) lastDownAt = simT;
+      queue.shift();
+    } else {
+      const d = down.get(q.pos);
+      if (!d) { queue.shift(); continue; }
+      if (simT - d.since < MIN_HOLD) return;
+      down.delete(q.pos);
+      queue.shift();
+      if (!MOD_POS.has(q.pos)) {
+        for (const [mp, l] of latch) if (l.kind === 'once') { latch.delete(mp); after(10, () => release(mp)); }
+      }
+    }
+  }
+}
+
+function rawMask() {
+  let lo = 0, hi = 0;
+  for (const pos of down.keys()) { if (pos < 32) lo |= 1 << pos; else hi |= 1 << (pos - 32); }
+  return [lo >>> 0, hi >>> 0];
+}
+
+/* ------------------------------------------------------------ host side */
+function pushTokens(ev) {
+  for (const t of eventToTokens(ev)) {
+    if (t.t === 'bksp') {
+      for (let i = term.length - 1; i >= 0; i--) {
+        if (term[i].t === 'text') {
+          const cps = Array.from(term[i].s); cps.pop(); term[i].s = cps.join('');
+          if (!term[i].s) term.splice(i, 1);
+          break;
+        }
+        if (term[i].t === 'key') { term.splice(i, 1); break; }
+      }
+    } else if (t.t === 'text' && term.length && term[term.length - 1].t === 'text') {
+      term[term.length - 1].s += t.s;
+    } else {
+      term.push({ ...t });
+    }
+  }
+  if (term.length > 400) term.splice(0, term.length - 400);
+  termDirty = true;
+}
+
+function gotEvents(list) {
+  for (const ev of list) {
+    ev.at = simT;
+    events.unshift(ev);
+    pushTokens(ev);
+  }
+  if (events.length > 40) events.length = 40;
+  if (list.length) eventsDirty = true;
+}
+
+function onTransaction(t) {
+  i2cMark = true;
+  let s = `<b>${String(simT).padStart(6, ' ')} ms</b>  W ${hex(t.addr)}: ${t.write.map(hex).join(' ')}`;
+  if (t.nack) s += ' · <span class="nack">NACK</span>';
+  else if (t.read) {
+    const shown = t.read.slice(0, 16).map(hex).join(' ');
+    s += ` · R ${t.read.length} B: ${shown}${t.read.length > 16 ? ' …' : ''}`;
+  }
+  logLines.unshift(s);
+  if (logLines.length > 60) logLines.length = 60;
+  logDirty = true;
+}
+
+function afterHostAccess() {
+  const p = core.takePending();
+  if (p === 1) {
+    core.init();
+    logLines.unshift('<b>— software reset: registers back to defaults</b>');
+    logDirty = true;
+  } else if (p === 2) {
+    enterBootloader();
+  }
+}
+
+/* ------------------------------------------------------------ simulation */
+function stepMs() {
+  for (let i = timers.length - 1; i >= 0; i--) {
+    if (timers[i].at <= simT) { const t = timers.splice(i, 1)[0]; t.fn(); }
+  }
+  processQueue();
+  if (mode === 'run') {
+    const [lo, hi] = rawMask();
+    core.tick(lo, hi, 1);
+    st = core.state();
+    if ($('auto').checked && st.int && simT - lastPoll >= 3) {
+      lastPoll = simT;
+      gotEvents(host.poll());
+      st = core.state();
+    }
+  }
+  const b = (mode === 'run' && st.int ? 1 : 0) | (i2cMark ? 2 : 0) | (mode === 'run' && st.stopped ? 4 : 0) | (mode === 'boot' ? 8 : 0);
+  scope[simT % SCOPE_MS] = b;
+  i2cMark = false;
+  simT++;
+}
+
+function enterBootloader() {
+  mode = 'boot';
+  bus.detach(UAKB.ADDR_DEFAULT);
+  down.clear(); latch.clear(); queue.length = 0;
+  $('boot').hidden = false;
+  logLines.unshift('<b>— STM32 jumped to the system bootloader (0x1FFF0000)</b>');
+  logDirty = true;
+}
+
+function powerCycle() {
+  mode = 'run';
+  core.init();
+  bus.attach(UAKB.ADDR_DEFAULT, core);
+  down.clear(); latch.clear(); queue.length = 0; timers.length = 0;
+  $('boot').hidden = true;
+  st = core.state();
+  logLines.unshift('<b>— power cycled</b>');
+  logDirty = true;
+}
+
+function playDemo() {
+  if (mode !== 'run') return;
+  let t = 0;
+  for (const keys of DEMO) {
+    after(t, () => keys.forEach((k) => press(k, 'demo')));
+    after(t + 30, () => keys.forEach((k) => release(k)));
+    t += 60;
+  }
+}
+
+/* ------------------------------------------------------------ rendering */
+function renderTerm() {
+  if (!termDirty) return;
+  termDirty = false;
+  const el = $('term');
+  el.textContent = '';
+  for (const t of term) {
+    if (t.t === 'text') el.append(document.createTextNode(t.s));
+    else { const k = document.createElement('span'); k.className = 'k'; k.textContent = t.s; el.append(k); }
+  }
+  const cur = document.createElement('span'); cur.className = 'cur'; el.append(cur);
+  el.scrollTop = el.scrollHeight;
+}
+
+const TYPE_NAMES = { 1: 'press', 2: 'release', 3: 'repeat' };
+function evText(ev) {
+  if (ev.special) return specialName(ev.special);
+  const named = { '\n': '⏎ Enter', '\b': '⌫ Bksp', '\t': 'Tab', '\x1b': 'Esc', '\x7f': 'Del', ' ': 'space' };
+  return named[ev.text] || ev.text;
+}
+function renderEvents() {
+  if (!eventsDirty) return;
+  eventsDirty = false;
+  const el = $('events');
+  el.textContent = '';
+  if (!events.length) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = 'Nothing read yet.'; el.append(e); return; }
+  for (const ev of events.slice(0, 12)) {
+    const row = document.createElement('div'); row.className = 'ev';
+    const pill = document.createElement('span'); pill.className = 'pill p' + ev.type; pill.textContent = TYPE_NAMES[ev.type] || ev.type;
+    const key = document.createElement('span'); key.className = 'mono'; key.textContent = `${ev.row},${ev.col}`; key.title = 'row, column; key = ' + ev.key;
+    const m = document.createElement('span'); m.className = 'm'; m.textContent = [...modNames(ev.mods), ev.ua ? 'UA' : 'EN', ev.caps ? 'Caps' : ''].filter(Boolean).join(' ');
+    const txt = document.createElement('span'); txt.className = 'txt'; txt.textContent = evText(ev);
+    const hx = document.createElement('span'); hx.className = 'hex'; hx.textContent = ev.bytes.map(hex).join(' ');
+    row.append(pill, key, txt, m, hx);
+    el.append(row);
+  }
+}
+
+function renderLog() {
+  if (!logDirty) return;
+  logDirty = false;
+  $('log').innerHTML = logLines.map((l) => `<div>${l}</div>`).join('') || '<div>No traffic yet.</div>';
+}
+
+function renderFifo() {
+  const el = $('fifo');
+  if (!el.children.length) {
+    for (let i = 0; i < 16; i++) { const s = document.createElement('div'); s.className = 'slot'; el.append(s); }
+  }
+  for (let i = 0; i < 16; i++) {
+    const s = el.children[i];
+    const key = i < st.count ? core.peek(i).join(',') : '';
+    if (s.dataset.k === key) continue;
+    s.dataset.k = key;
+    s.textContent = '';
+    if (i < st.count) {
+      const ev = decodeEvent(core.peek(i));
+      s.className = 'slot full';
+      s.title = ev.bytes.map(hex).join(' ');
+      const t = document.createElement('span'); t.className = 't'; t.textContent = ev.type === 3 ? 'R' : ev.type === 2 ? '↑' : '';
+      const g = document.createElement('span'); g.className = 'g';
+      g.textContent = ev.special ? specialName(ev.special) : ({ '\n': '⏎', '\b': '⌫', ' ': '␣', '\t': '⇥', '\x1b': 'Esc', '\x7f': 'Del' })[ev.text] || ev.text;
+      s.append(t, g);
+    } else {
+      s.className = 'slot';
+      s.title = 'empty';
+    }
+  }
+  $('fifo-count').textContent = st.count;
+  $('fifo-ovf').hidden = !st.overflow;
+}
+
+let colors = null, colorsAt = -1e9;
+function readColors() {
+  const cs = getComputedStyle(document.documentElement);
+  const g = (n) => cs.getPropertyValue(n).trim();
+  colors = { bg: g('--bg'), line: g('--line'), muted: g('--muted'), signal: g('--signal'), accent: g('--accent'), run: g('--run'), stop: g('--stop'), ink: g('--ink') };
+}
+
+function renderScope() {
+  const cv = $('scope');
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w) return;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  if (performance.now() - colorsAt > 800) { readColors(); colorsAt = performance.now(); }
+  const c = cv.getContext('2d');
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, w, h);
+  const left = 58, right = 8, plotW = w - left - right;
+  const lanes = [{ y: 10, name: 'INT' }, { y: 44, name: 'I2C' }, { y: 78, name: 'STM32' }];
+  const laneH = 24;
+  c.font = '500 11px ' + getComputedStyle(document.body).fontFamily;
+  c.textBaseline = 'middle';
+  c.strokeStyle = colors.line; c.lineWidth = 1;
+  for (let s = 0; s <= 3; s++) {
+    const x = left + plotW - (s * 1000 / SCOPE_MS) * plotW + 0.5;
+    c.beginPath(); c.moveTo(x, 4); c.lineTo(x, h - 4); c.stroke();
+  }
+  c.fillStyle = colors.muted;
+  for (const l of lanes) c.fillText(l.name, 8, l.y + laneH / 2);
+  c.textAlign = 'right';
+  c.fillText('0', w - right, h - 6);
+  c.textAlign = 'left';
+  const n = Math.min(simT, SCOPE_MS);
+  const xAt = (age) => left + plotW - (age / SCOPE_MS) * plotW;
+  /* INT: high = idle, low = events waiting */
+  c.strokeStyle = colors.signal; c.lineWidth = 1.6; c.beginPath();
+  for (let age = n - 1; age >= 0; age--) {
+    const v = scope[(simT - 1 - age + SCOPE_MS * 4) % SCOPE_MS];
+    const y = (v & 1) ? lanes[0].y + laneH : lanes[0].y;
+    const x = xAt(age);
+    if (age === n - 1) c.moveTo(x, y); else c.lineTo(x, y);
+  }
+  c.stroke();
+  /* I2C transactions */
+  c.fillStyle = colors.accent;
+  for (let age = 0; age < n; age++) {
+    if (scope[(simT - 1 - age + SCOPE_MS * 4) % SCOPE_MS] & 2) c.fillRect(xAt(age) - 1, lanes[1].y + 3, 2, laneH - 6);
+  }
+  c.strokeStyle = colors.line; c.beginPath(); c.moveTo(left, lanes[1].y + laneH / 2 + 0.5); c.lineTo(left + plotW, lanes[1].y + laneH / 2 + 0.5); c.stroke();
+  /* power: RUN band high, Stop low */
+  const drawBand = (from, to, v) => {
+    const x0 = xAt(from), x1 = xAt(to);
+    const low = (v & 12) !== 0;
+    c.fillStyle = (v & 8) ? colors.signal : (v & 4) ? colors.stop : colors.run;
+    c.globalAlpha = low ? 0.55 : 0.85;
+    c.fillRect(x0, low ? lanes[2].y + laneH - 6 : lanes[2].y, Math.max(1, x1 - x0), 6);
+    c.globalAlpha = 1;
+  };
+  let segStart = n - 1, segV = scope[(simT - n + SCOPE_MS * 4) % SCOPE_MS] & 12;
+  for (let age = n - 2; age >= -1; age--) {
+    const v = age >= 0 ? scope[(simT - 1 - age + SCOPE_MS * 4) % SCOPE_MS] & 12 : -1;
+    if (v !== segV) { drawBand(segStart, age + 1, segV); segStart = age; segV = v; }
+  }
+}
+
+function setChip(el, text, cls) { if (el.textContent !== text) el.textContent = text; el.className = 'chip ' + cls; }
+
+let lastBoardKey = '';
+function renderDevice() {
+  const boot = mode === 'boot';
+  $('led-ua').className = 'dot' + (!boot && st.led ? ' on-ua' : '');
+  $('led-int').className = 'dot' + (!boot && st.int ? ' on-int' : '');
+  $('int-text').textContent = boot ? 'INT: 1, firmware not running' : st.int ? `INT: 0, ${st.count} queued` : 'INT: 1, queue empty';
+  if (boot) setChip($('pwr-chip'), 'BOOTLOADER', 'sig');
+  else if (st.stopped) setChip($('pwr-chip'), 'STOP 1', 'stop');
+  else setChip($('pwr-chip'), 'RUN', 'run');
+  setChip($('lang-chip'), st.ua ? 'UA' : 'EN', st.ua ? 'on' : '');
+  setChip($('caps-chip'), st.caps ? 'on' : st.capsArm ? 'release Shift' : 'off', st.caps || st.capsArm ? 'on' : '');
+  const held = [...modNames(st.mods)];
+  const others = [...down.keys()].filter((p) => !MOD_POS.has(p)).length;
+  if (others) held.push(others + (others === 1 ? ' key' : ' keys'));
+  $('mods-text').textContent = held.length ? held.join(' + ') : '—';
+
+  const board = $('board');
+  board.classList.toggle('lang-en', !st.ua);
+  board.classList.toggle('fn-on', !!(st.mods & UAKB.MOD.FN));
+  const key = [...down.keys()].join(',') + '|' + [...latch].map(([p, l]) => p + l.kind).join(',');
+  if (key !== lastBoardKey) {
+    lastBoardKey = key;
+    for (const b of board.children) {
+      const p = +b.dataset.pos, l = latch.get(p);
+      b.classList.toggle('down', down.has(p));
+      b.classList.toggle('latched', !!l && l.kind === 'once');
+      b.classList.toggle('locked', !!l && l.kind === 'lock');
+    }
+  }
+}
+
+function renderMcu() {
+  if (mode === 'boot') {
+    $('st-power').textContent = 'ROM bootloader, application stopped';
+  } else if (st.stopped) {
+    $('st-power').textContent = `Stop 1 · wake-ups: ${st.wakeups}`;
+  } else {
+    const idle = st.now - st.lastActivity;
+    const why = !(st.config & UAKB.CFG.SLEEP) ? 'sleep disabled in CONFIG'
+      : st.backlight ? 'backlight is on'
+      : st.busy ? 'a key is held'
+      : `sleeps in ${Math.max(0, 100 - idle)} ms`;
+    $('st-power').textContent = `RUN · ${why}`;
+  }
+  if (st.repeatPos >= 0) {
+    $('st-repeat').textContent = `key ${Math.floor(st.repeatPos / 12)},${st.repeatPos % 12}`;
+  } else {
+    $('st-repeat').textContent = st.config & UAKB.CFG.REPEAT ? `armed · ${st.repeatDelay * 10} / ${st.repeatRate * 10} ms` : 'off';
+  }
+  $('st-time').textContent = (st.now / 1000).toFixed(2) + ' s';
+  $('st-events').textContent = st.events;
+  $('st-ptr').textContent = '0x' + hex(st.ptr) + (REG_NAMES[st.ptr] ? ' ' + REG_NAMES[st.ptr] : st.ptr === 0x10 ? ' FIFO' : st.ptr === 0x20 ? ' COMMAND' : '');
+  renderFifo();
+}
+
+function syncControl(el, value) { if (document.activeElement !== el && String(el.value) !== String(value)) el.value = value; }
+function renderRegs() {
+  $('cfg-val').textContent = '0x' + hex(st.config);
+  for (const [bit] of CFG_BITS) { const cb = $('cfg-' + bit); if (document.activeElement !== cb) cb.checked = !!(st.config & bit); }
+  syncControl($('r-delay'), st.repeatDelay);
+  syncControl($('r-rate'), st.repeatRate);
+  syncControl($('r-led'), st.ledMode);
+  syncControl($('r-bl'), st.backlight);
+  $('v-delay').textContent = `${st.repeatDelay * 10} ms · 0x06 = ${st.repeatDelay}`;
+  $('v-rate').textContent = `${st.repeatRate * 10} ms · 0x07 = ${st.repeatRate}`;
+  $('v-bl').textContent = `${st.backlight} / 255 · 0x0A`;
+  $('lang-ua').classList.toggle('sel', st.ua);
+  $('lang-en').classList.toggle('sel', !st.ua);
+}
+
+function renderRegDump() {
+  const t = $('regtable');
+  t.textContent = '';
+  if (!regDump) {
+    const tr = t.insertRow(); const td = tr.insertCell(); td.colSpan = 3; td.className = 'note'; td.style.fontFamily = 'inherit';
+    td.textContent = regDump === null ? 'Press Read: the host fetches 11 bytes in one transaction.' : 'NACK: the keyboard does not answer.';
+    return;
+  }
+  regDump.forEach((v, i) => {
+    const tr = t.insertRow();
+    tr.insertCell().textContent = '0x' + hex(i);
+    tr.insertCell().textContent = REG_NAMES[i];
+    tr.insertCell().textContent = '0x' + hex(v) + ' · ' + v;
+  });
+}
+
+function render() {
+  renderDevice();
+  if (mode === 'run') { renderMcu(); renderRegs(); }
+  else { $('st-power').textContent = 'ROM bootloader, application stopped'; }
+  renderTerm();
+  renderEvents();
+  renderLog();
+  renderScope();
+}
+
+/* ------------------------------------------------------------ input */
+function bindInput() {
+  const board = $('board');
+  const active = new Map(); /* pointerId -> pos */
+  board.addEventListener('pointerdown', (e) => {
+    const b = e.target.closest('.key'); if (!b) return;
+    e.preventDefault();
+    const pos = +b.dataset.pos;
+    if (MOD_POS.has(pos)) { clickModifier(pos); return; }
+    b.setPointerCapture(e.pointerId);
+    active.set(e.pointerId, pos);
+    press(pos, 'mouse');
+  });
+  const up = (e) => { const pos = active.get(e.pointerId); if (pos == null) return; active.delete(e.pointerId); release(pos); };
+  board.addEventListener('pointerup', up);
+  board.addEventListener('pointercancel', up);
+  board.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  const isControl = (t) => t && t.closest && !t.closest('.board') && t.closest('input, select, textarea, button');
+  /* after a mouse click on a control, give the keys back to the simulated keyboard */
+  document.addEventListener('click', (e) => {
+    const c = e.target.closest && e.target.closest('button, input[type=checkbox], label');
+    if (c && e.detail > 0 && !c.closest('.board')) setTimeout(() => document.activeElement && document.activeElement.blur(), 0);
+  });
+  document.addEventListener('change', (e) => {
+    if (e.target.matches('select, input[type=range]')) setTimeout(() => e.target.blur(), 0);
+  });
+  window.addEventListener('keydown', (e) => {
+    if (isControl(e.target)) return;
+    const pos = PHYS[e.code];
+    if (pos == null) return;
+    e.preventDefault();
+    if (e.repeat) return;
+    press(pos, 'kbd');
+  });
+  window.addEventListener('keyup', (e) => {
+    const pos = PHYS[e.code];
+    if (pos == null) return;
+    if (!isControl(e.target)) e.preventDefault();
+    const d = down.get(pos);
+    if (d && d.src === 'kbd') release(pos);
+  });
+  window.addEventListener('blur', () => { for (const [p, d] of down) if (d.src === 'kbd' || d.src === 'mouse') release(p); });
+
+  $('btn-demo').onclick = playDemo;
+  $('btn-power').onclick = powerCycle;
+  $('btn-boot-exit').onclick = powerCycle;
+  $('btn-clear-term').onclick = () => { term = []; termDirty = true; events = []; eventsDirty = true; };
+  $('m-count').onclick = () => { host.readReg(UAKB.REG.COUNT); afterHostAccess(); };
+  $('m-one').onclick = () => { gotEvents(host.readEvents(1)); afterHostAccess(); };
+  $('m-all').onclick = () => { gotEvents(host.poll()); afterHostAccess(); };
+  $('m-partial').onclick = () => { host.readEvents(1, 5); afterHostAccess(); };
+  $('m-status').onclick = () => { host.readReg(UAKB.REG.STATUS); afterHostAccess(); };
+
+  const cfg = $('cfg');
+  for (const [bit, name, text] of CFG_BITS) {
+    const l = document.createElement('label');
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.id = 'cfg-' + bit;
+    cb.onchange = () => {
+      const v = cb.checked ? (st.config | bit) : (st.config & ~bit);
+      host.writeReg(UAKB.REG.CONFIG, v); afterHostAccess();
+    };
+    const b = document.createElement('span'); b.className = 'bit'; b.textContent = '0x' + hex(bit);
+    const t = document.createElement('span'); t.textContent = `${text}`; t.title = name;
+    l.append(cb, b, t); cfg.append(l);
+  }
+  $('r-delay').oninput = (e) => { host.writeReg(UAKB.REG.REPEAT_DELAY, +e.target.value); afterHostAccess(); };
+  $('r-rate').oninput = (e) => { host.writeReg(UAKB.REG.REPEAT_RATE, +e.target.value); afterHostAccess(); };
+  $('r-led').onchange = (e) => { host.writeReg(UAKB.REG.LED, +e.target.value); afterHostAccess(); };
+  $('r-bl').oninput = (e) => { host.writeReg(UAKB.REG.BACKLIGHT, +e.target.value); afterHostAccess(); };
+  $('lang-ua').onclick = () => { host.writeReg(UAKB.REG.LANG, 1); afterHostAccess(); };
+  $('lang-en').onclick = () => { host.writeReg(UAKB.REG.LANG, 0); afterHostAccess(); };
+  $('c-clear').onclick = () => { host.command(UAKB.CMD.CLEAR_FIFO); afterHostAccess(); };
+  $('c-reset').onclick = () => { host.command(UAKB.CMD.RESET, true); afterHostAccess(); };
+  $('c-boot').onclick = () => { host.command(UAKB.CMD.BOOTLOADER, true); afterHostAccess(); };
+  $('r-dump').onclick = () => { const r = host.readRegs(0, 11); regDump = r ? Array.from(r) : false; renderRegDump(); afterHostAccess(); };
+}
+
+/* ------------------------------------------------------------ start */
+(async () => {
+  const bytes = Uint8Array.from(atob(WASM_B64), (ch) => ch.charCodeAt(0));
+  core = await createCore(bytes);
+  core.init();
+  bus = new SimBus();
+  bus.attach(UAKB.ADDR_DEFAULT, core);
+  bus.onTransaction = onTransaction;
+  host = new UAKBHost(bus);
+  st = core.state();
+  buildBoard();
+  bindInput();
+  renderRegDump();
+
+  /* open in a working state: the NUCLEO demo phrase, already typed */
+  playDemo();
+  for (let i = 0; i < 1500; i++) stepMs();
+  render();
+
+  wall = performance.now();
+  started = true;
+  const frame = () => {
+    catchUp();
+    render();
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+})();
+</script>

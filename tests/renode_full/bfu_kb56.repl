@@ -1,0 +1,85 @@
+// SPDX-FileCopyrightText: 2026 BFU Electronics LTD
+// SPDX-License-Identifier: Apache-2.0
+// STM32G030K6T6 on the BFU-KB56 keyboard, for the full-system emulation.
+// CPU, NVIC/SysTick, memories and TIM16 are Renode's; RCC, GPIO, EXTI, PWR, I2C1 and the
+// key matrix are the models in models/UaKbModels.cs.
+
+flash: Memory.MappedMemory @ { sysbus 0x0; sysbus 0x08000000 }
+    size: 0x8000
+
+ram: Memory.MappedMemory @ sysbus 0x20000000
+    size: 0x2000
+
+sysmem: Memory.MappedMemory @ sysbus 0x1FFF0000
+    size: 0x2000
+
+nvic: IRQControllers.NVIC @ sysbus 0xE000E000
+    priorityMask: 0xC0
+    systickFrequency: 16000000
+    haltSystickOnDeepSleep: true
+    IRQ -> cpu@0
+
+cpu: CPU.CortexM @ sysbus
+    cpuType: "cortex-m0"
+    nvic: nvic
+
+rcc: UaKb.G0_RCC @ sysbus 0x40021000
+
+exti: UaKb.G0_EXTI @ sysbus 0x40021800
+    IRQ01 -> nvic@5
+    IRQ23 -> nvic@6
+    IRQ415 -> nvic@7
+
+// externalPullUps: pins that have a pull-up on the board
+gpioA: UaKb.G0_GPIO @ sysbus <0x50000000, +0x400>
+    rcc: rcc
+    exti: exti
+    portIndex: 0
+    modeResetValue: 0xEBFFFFFF
+    pullResetValue: 0x24000000
+    externalPullUps: 0x0488
+    portName: "PA"
+
+// PB5 INT, PB6 SCL, PB7 SDA: pull-ups on the host side of the bus
+gpioB: UaKb.G0_GPIO @ sysbus <0x50000400, +0x400>
+    rcc: rcc
+    exti: exti
+    portIndex: 1
+    externalPullUps: 0x00E0
+    portName: "PB"
+
+gpioC: UaKb.G0_GPIO @ sysbus <0x50000800, +0x400>
+    rcc: rcc
+    exti: exti
+    portIndex: 2
+    portName: "PC"
+
+pwr: UaKb.G0_PWR @ sysbus 0x40007000
+    cpu: cpu
+    rcc: rcc
+
+syscfg: UaKb.G0_RegFile @ sysbus 0x40010000
+    name: "SYSCFG"
+
+dbg: UaKb.G0_RegFile @ sysbus 0x40015800
+    name: "DBG"
+
+flash_if: UaKb.G0_RegFile @ sysbus 0x40022000
+    name: "FLASH"
+
+i2c1: UaKb.G0_I2C_Slave @ sysbus 0x40005400
+    rcc: rcc
+    gpioB: gpioB
+    exti: exti
+    pwr: pwr
+    IRQ -> nvic@23
+
+timer16: Timers.STM32_Timer @ sysbus 0x40014400
+    frequency: 16000000
+    initialLimit: 0xFFFF
+    -> nvic@21
+
+// the key matrix is not on the bus; the address only makes it reachable from the monitor
+matrix: UaKb.UaKbMatrix @ sysbus 0x5F000000
+    gpioA: gpioA
+    gpioB: gpioB

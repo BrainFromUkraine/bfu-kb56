@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 BFU Electronics LTD
+# SPDX-License-Identifier: Apache-2.0
+build/
+tests/test_app
+__pycache__/
+*.pyc
+tools/simulator/dist/

@@ -1,0 +1,93 @@
+# SPDX-FileCopyrightText: 2026 BFU Electronics LTD
+# SPDX-License-Identifier: Apache-2.0
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RENODE_VERSION: 1.15.3
+
+jobs:
+  firmware:
+    name: Build firmware
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi cmake
+      - name: Build keyboard
+        run: cmake --preset keyboard && cmake --build --preset keyboard
+      - name: Build NUCLEO-G071RB
+        run: cmake --preset nucleo && cmake --build --preset nucleo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: |
+            build/keyboard/bfu-kb56.elf
+            build/keyboard/bfu-kb56.hex
+            build/keyboard/bfu-kb56.bin
+            build/nucleo/bfu-kb56-nucleo-g071rb.elf
+            build/nucleo/bfu-kb56-nucleo-g071rb.hex
+            build/nucleo/bfu-kb56-nucleo-g071rb.bin
+
+  unit-tests:
+    name: Unit tests (ASan + UBSan)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: make -C tests
+
+  simulator:
+    name: Browser simulator
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang and wasm-ld
+        run: sudo apt-get update && sudo apt-get install -y clang lld
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build and test
+        working-directory: tools/simulator
+        run: python3 build.py && node test_sim.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simulator
+          path: tools/simulator/dist/bfu-kb56-simulator.html
+
+  renode:
+    name: Renode emulation
+    needs: firmware
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: build
+      - name: Install Renode
+        run: |
+          curl -sSfL -o renode.tar.gz \
+            https://github.com/renode/renode/releases/download/v${RENODE_VERSION}/renode-${RENODE_VERSION}.linux-portable.tar.gz
+          mkdir -p "$RUNNER_TEMP/renode" && tar -xzf renode.tar.gz -C "$RUNNER_TEMP/renode" --strip-components=1
+          echo "RENODE=$RUNNER_TEMP/renode/renode" >> "$GITHUB_ENV"
+      - name: Install toolchain (ROM stub)
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
+      - name: Firmware images in Renode
+        run: python3 tests/renode/run_renode_tests.py
+      - name: Full-system emulation
+        run: python3 tests/renode_full/run_full.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: renode-logs
+          path: build/renode_full/

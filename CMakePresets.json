@@ -1,0 +1,13 @@
+{
+  "version": 3,
+  "configurePresets": [
+    { "name": "keyboard", "displayName": "BFU-KB56 keyboard (STM32G030K6)", "binaryDir": "build/keyboard",
+      "cacheVariables": { "BOARD": "BFU_KB56", "CMAKE_BUILD_TYPE": "MinSizeRel" } },
+    { "name": "nucleo", "displayName": "NUCLEO-G071RB test", "binaryDir": "build/nucleo",
+      "cacheVariables": { "BOARD": "NUCLEO_G071RB", "CMAKE_BUILD_TYPE": "MinSizeRel" } }
+  ],
+  "buildPresets": [
+    { "name": "keyboard", "configurePreset": "keyboard" },
+    { "name": "nucleo", "configurePreset": "nucleo" }
+  ]
+}

@@ -1,0 +1,19 @@
+BFU-KB56 keyboard firmware
+Copyright 2026 BFU Electronics LTD
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+The documentation in docs/ is licensed under the Creative Commons Attribution
+4.0 International License (see LICENSES/CC-BY-4.0.txt).
+
+This product includes third-party software:
+
+  Arm CMSIS Core (third_party/cmsis_core)
+  Copyright (c) 2009-2023 Arm Limited. All rights reserved.
+  Licensed under the Apache License, Version 2.0.
+
+  STM32G0xx CMSIS Device (third_party/cmsis_device_g0)
+  Copyright (c) 2018-2021 STMicroelectronics. All rights reserved.
+  Licensed under the Apache License, Version 2.0.
+
+"BFU", "BFU Electronics" and "BFU-KB56" are trademarks of BFU Electronics LTD. The licenses above
+do not grant permission to use these names; see TRADEMARKS.md.
